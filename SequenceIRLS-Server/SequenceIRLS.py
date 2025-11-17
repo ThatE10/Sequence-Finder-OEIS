@@ -1,4 +1,9 @@
 import numpy as np
+import math
+import scipy as sp
+from typing import List, Dict, Tuple
+
+import numpy as np
 import scipy as sp
 from scipy.linalg import hankel
 import math
@@ -181,4 +186,132 @@ def hm_irls(data_vector, rank_estimate, max_iter=100, tol=1e-8, type_mean='harmo
     stats['ranks'] = ranks
     stats['smoothing'] = smoothing[0:f]
     stats['k'] = f
-    return x, stats
+    print(S)
+    return x, S, rel_chg
+
+def complete_sequence(data_vector,rank_estimate,max_iter=100,tol=1e-8,type_mean='harmonic')->List[float]:
+    """
+    Returns only missing values in order.
+    """
+    data_vector = [float('nan') if x is None else x for x in data_vector]
+    print(f"data_vector: {data_vector}")
+    results, S, rel_chg = hm_irls(data_vector,rank_estimate,max_iter,tol,type_mean)
+    data_vector = np.array(data_vector, dtype=float)
+
+    # Now np.isnan works
+     # Create mask for missing entries (NaN)
+    missing_mask = np.isnan(data_vector)
+    #print(type(results))
+    #print(missing_mask)
+    # Return only the results corresponding to missing entries
+    #print(results[missing_mask].tolist())
+    print(np.round(results[missing_mask],0).tolist())
+    rounded = np.round(results[missing_mask],0)
+    pred_x = rounded.tolist()
+    print(pred_x)
+    print(S.tolist())
+    print(rel_chg)
+    return pred_x, S.tolist(), rel_chg
+
+async def hm_irls_iterative(data_vector,rank_estimate,max_iter=100,tol=1e-8,type_mean='harmonic',frequency=1)->List[float]:
+    """Runs an iteratively reweighted least squares algorithms for the recovery of incomplete linear recurrence sequences from partial data.
+    Leverages low-rank property of underlying Hankel matrix.
+
+    Parameters
+    ----------
+    data_vector :  numpy.array / list
+        Incomplete sequence of total length n. Zero values correspond to missing data at respective index (potential todo: change to float("nan"))
+    rank_estimate : int
+        Target rank of Hankel matrix. Corresponds to order of linear recurrence relation.
+    max_iter : int
+        Maximum number of iterations.
+    tol : float
+        Tolerance parameter that governs the stopping criterion. Stopping criterion: Relative change of l2-norm smaller than tol.
+    Returns
+    -------
+    x : numpy.array
+        Reconstructed sequence.
+    stats : dictionary
+        Contains algorithmic statistics.
+    """
+
+    x = [float('nan') if x is None else x for x in data_vector]
+    x = np.array(x, dtype=float)
+
+    missing_mask = np.isnan(x)
+
+    P = P_omega(x)
+    x = [0 if (isinstance(num, float) or isinstance(num, int)) and math.isnan(num) else num for num in x] 
+
+
+
+
+    # The unpadded 0 vector of data
+    y = x @ P.T
+
+    r = rank_estimate  # true_rank_parameter
+
+    n = len(x)
+    m = len(y)
+    # R = rank_estimate  : I got rid of this parameter as it is not necessary to formulate the IRLS algorithm
+
+    U, S, Vt = np.linalg.svd(sp.linalg.hankel(x))
+
+    smoothing = [0] * (max_iter)
+    smoothing[0] = S[0]
+
+    weights = [0] * (max_iter)
+    weights[0] = smoothing[0] * np.identity(n)
+    ranks = []
+    stats = dict()
+
+    for f in range(1, max_iter):
+        x_o = x.copy()
+        # print(f)
+
+        W = weights[f - 1]
+
+        if np.linalg.det(W) != 0:
+            W_i = np.linalg.inv(W)
+
+        # We can simplify the following line to make it more computationally efficent by solving directly for z
+        # x = W_i @ P.T @ (np.linalg.inv(P@W_i@P.T) @ y )
+        # P @ W_i @ P.T * z = Y    => linalg.solve(P@W_i@P.T,y)
+
+        # recalculate the data vector using a minimisation method & constraint (4
+        x = W_i @ P.T @ (np.linalg.solve(P @ W_i @ P.T, y))
+
+        # SVD of the Padded hankel data vector (5)
+        U, S, Vt = np.linalg.svd(hankel(x))
+
+        smoothing[f] = min(smoothing[f - 1], S[r])
+        r_c = np.sum(S > smoothing[f])
+        ranks.append(r_c)
+
+        # Calculate each element in the weight matrix with
+        # W_ij = e_i.T W @ e_j
+        # => vec(e_i.hankel) @ vec(weight_tilda(e_j.hankel))
+        W = np.zeros([n, n])
+
+        for i in range(0, n):
+            e_i = [0] * n
+            e_i[i] = 1
+            for j in range(0, n):
+                e_j = [0] * n
+                e_j[j] = 1
+                W[i, j] = hankel(e_i).flatten() @ weight_tilda(U[:, :r_c], S, Vt[:r_c, :].T, smoothing[f], hankel(e_j),
+                                                               type_mean=type_mean).flatten()
+        weights[f] = W
+        #print(np.round(x, 8))
+        # Check stopping criterion: relativ l2-error < tol
+        rel_chg = np.linalg.norm(x_o - x) / np.linalg.norm(x_o)
+        #print(rel_chg)
+        if f > 1 and rel_chg < tol:
+            break
+        
+        yield S, x[missing_mask].tolist(), rel_chg
+    
+    stats['ranks'] = ranks
+    stats['smoothing'] = smoothing[0:f]
+    stats['k'] = f
+    
