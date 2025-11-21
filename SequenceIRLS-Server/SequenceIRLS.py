@@ -8,6 +8,8 @@ import scipy as sp
 from scipy.linalg import hankel
 import math
 
+import asyncio
+
 def ceil(R):
     return R
 
@@ -265,6 +267,7 @@ async def hm_irls_iterative(data_vector,rank_estimate,max_iter=100,tol=1e-8,type
     ranks = []
     stats = dict()
 
+    idx=0
     for f in range(1, max_iter):
         x_o = x.copy()
         # print(f)
@@ -310,6 +313,8 @@ async def hm_irls_iterative(data_vector,rank_estimate,max_iter=100,tol=1e-8,type
             break
         
         yield S, x[missing_mask].tolist(), rel_chg
+        await asyncio.sleep(0)  # Allow other tasks to run
+        idx += 1
     
     stats['ranks'] = ranks
     stats['smoothing'] = smoothing[0:f]
