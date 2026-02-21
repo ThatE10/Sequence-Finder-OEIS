@@ -37,6 +37,7 @@ class PredictionUpdate(BaseModel):
     elements_updated: List[float]
     error: float
     iteration: int
+    w_matrix: Optional[List[List[float]]] = None
 
 class SequenceResponse(BaseModel):
     elements_updated: List[float]
@@ -133,7 +134,7 @@ async def predict_sequence_stream(request: SequenceRequest):
 
         async def generate_predictions():
             idx = 0
-            async for S, x, err in hm_irls_iterative(
+            async for S, x, err, W_mat in hm_irls_iterative(
                 data_vector=sequence,
                 rank_estimate=settings.rank,
                 max_iter=settings.max_iters,
@@ -146,6 +147,7 @@ async def predict_sequence_stream(request: SequenceRequest):
                     elements_updated=x,  # you may need to convert x if it's not already a list of PredictedElement
                     sigma=[float(s) for s in S],
                     error=float(err),
+                    w_matrix=W_mat
                 )
 
                 data = {

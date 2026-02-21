@@ -305,18 +305,20 @@ async def hm_irls_iterative(data_vector,rank_estimate,max_iter=100,tol=1e-8,type
                 W[i, j] = hankel(e_i).flatten() @ weight_tilda(U[:, :r_c], S, Vt[:r_c, :].T, smoothing[f], hankel(e_j),
                                                                type_mean=type_mean).flatten()
         weights[f] = W
-        #print(np.round(x, 8))
-        # Check stopping criterion: relativ l2-error < tol
-        rel_chg = np.linalg.norm(x_o - x) / np.linalg.norm(x_o)
-        #print(rel_chg)
-        if f > 1 and rel_chg < tol:
-            break
-        
-        yield S, x[missing_mask].tolist(), rel_chg
+
+        # Check stopping criterion: relative l2-error < tol
+        norm_xo = np.linalg.norm(x_o)
+        rel_chg = np.linalg.norm(x_o - x) / norm_xo if norm_xo > 1e-12 else 0.0
+
+        # Always yield this iteration's data (before possibly breaking)
+        yield S, x[missing_mask].tolist(), rel_chg, W.tolist()
         await asyncio.sleep(0)  # Allow other tasks to run
         idx += 1
-    
+
+        # Convergence check — only after at least 2 iterations
+        if f > 1 and rel_chg < tol:
+            break
+
     stats['ranks'] = ranks
     stats['smoothing'] = smoothing[0:f]
     stats['k'] = f
-    
